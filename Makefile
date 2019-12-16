@@ -1,5 +1,5 @@
 # Go parameters
-GOPATH=/home/richard/Code/tarfs
+GOPATH=$(CURDIR)
 GOCMD=go
 GOBUILD=$(GOCMD) build
 GOCLEAN=$(GOCMD) clean
@@ -13,24 +13,19 @@ BIN_PATH=./bin
 
 export GOPATH
 
-all: test build
+all: build
 
 build:
     $(GOBUILD) -o $(BIN_PATH)/$(BINARY_NAME) -v $(SRC_PATH)/$(BINARY_NAME)
-
-test:
-    $(GOTEST) -v $(SRC_PATH)/$(BINARY_NAME)
 
 clean:
     $(GOCLEAN)
     rm -f $(BIN_PATH)/$(BINARY_NAME)
 
-run: build
-   $(BIN_PATH)/$(BINARY_NAME)
-
 deps:
     $(GOGET) bazil.org/fuse
     $(GOGET) golang.org/x/net/context
 
+# export custom GOPATH to vim
 vim:
     vim
