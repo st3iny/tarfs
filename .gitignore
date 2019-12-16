@@ -1,0 +1,11 @@
+# jetbrains
+.idea/
+
+# go
+pkg/
+bin/
+
+# deps
+src/bazil.org/
+src/github.com/
+src/golang.org/
