@@ -2,7 +2,7 @@ package main
 
 import (
     "io"
-    _ "log"
+    "log"
     "os"
     "strconv"
     "syscall"
@@ -27,14 +27,9 @@ func MountAndServe(archivePath string, mountpoint string) error {
 
     srv := fs.New(c, nil)
 
-    var archive *Archive
-    archive, err = ReadArchive(archivePath)
+    filesys, err := createFS(archivePath)
     if err != nil {
         return err
-    }
-
-    filesys := &FS{
-        Archive: *archive,
     }
 
     if err := srv.Serve(filesys); err != nil {
@@ -49,12 +44,75 @@ func MountAndServe(archivePath string, mountpoint string) error {
     return nil
 }
 
+func createFS(archivePath string) (*FS, error) {
+    var archive *Archive
+    archive, err := ReadArchive(archivePath)
+    if err != nil {
+        return nil, err
+    }
+
+    uid := int64(0)
+    gid := int64(0)
+
+    user, err := user.Current()
+    if err == nil {
+        uid, _ = strconv.ParseInt(user.Uid, 10, 32)
+        gid, _ = strconv.ParseInt(user.Gid, 10, 32)
+    }
+
+    root := &Node{
+        Name: "root",
+        FullName: "",
+        Mode: os.ModeDir | 0555,
+        Uid: int(uid),
+        Gid: int(gid),
+        Children: archive.Nodes,
+        Archive: archive,
+    }
+
+    filesys := &FS{
+        Archive: *archive,
+        RootNode: File{Node: root},
+    }
+
+    linkMap := createLinkMap(archive, filesys)
+    filesys.LinkMap = linkMap
+    filesys.RootNode.FS = filesys
+
+    return filesys, nil
+}
+
+func createLinkMap(archive *Archive, filesys *FS) map[string]*File  {
+    linkMap := make(map[string]*File)
+    for _, node := range archive.List() {
+        if node.IsLink() {
+            linkMap[node.LinkName] = nil
+        }
+    }
+
+    for _, node := range archive.List() {
+        if _, present := linkMap[node.FullName]; present {
+            file := &File{
+                Node: node,
+                FS: filesys,
+            }
+            linkMap[node.FullName] = file
+        }
+    }
+
+    log.Println("found", len(linkMap), "hardlinks in archive")
+    return linkMap
+}
+
 type FS struct {
     Archive Archive
+    RootNode File
+    LinkMap map[string]*File
 }
 
 type File struct {
-    Node Node
+    Node *Node
+    FS *FS
 }
 
 type FileHandle struct {
@@ -68,25 +126,7 @@ var _ fs.FS = (*FS)(nil)
 // var _ fs.Handle = (*FileHandle)(nil)
 
 func (f *FS) Root() (fs.Node, error) {
-    uid := int64(0)
-    gid := int64(0)
-
-    user, err := user.Current()
-    if err == nil {
-        uid, _ = strconv.ParseInt(user.Uid, 10, 32)
-        gid, _ = strconv.ParseInt(user.Gid, 10, 32)
-    }
-
-    rootNode := Node{
-        Name: "root",
-        FullName: "",
-        Mode: os.ModeDir | 0555,
-        Uid: int(uid),
-        Gid: int(gid),
-        Children: f.Archive.Nodes,
-        Archive: &f.Archive,
-    }
-    return &File{Node: rootNode}, nil
+    return &f.RootNode, nil
 }
 
 var _ fs.NodeStringLookuper = (*File)(nil)
@@ -97,8 +137,16 @@ func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {
         blocks++
     }
 
+    if f.Node.IsLink() {
+        return f.FS.LinkMap[f.Node.LinkName].Attr(ctx, a)
+    }
+
     a.Inode = uint64(f.Node.index)
-    a.Size = uint64(f.Node.Size)
+    if f.Node.IsSymlink() {
+        a.Size = uint64(len(f.Node.LinkName))
+    } else {
+        a.Size = uint64(f.Node.Size)
+    }
     a.Blocks = blocks
     a.Mode = f.Node.Mode
     a.Uid = uint32(f.Node.Uid)
@@ -110,9 +158,10 @@ func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {
 }
 
 func (f *File) Lookup(ctx context.Context, name string) (fs.Node, error) {
-    for _, child := range f.Node.Children {
+    for index, _ := range f.Node.Children {
+        child := &f.Node.Children[index]
         if name == child.Name {
-            return &File{Node: child}, nil
+            return &File{Node: child, FS: f.FS}, nil
         }
     }
 
@@ -122,7 +171,7 @@ func (f *File) Lookup(ctx context.Context, name string) (fs.Node, error) {
 var _ fs.HandleReadDirAller = (*File)(nil)
 
 func (f *File) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
-    entries := []fuse.Dirent{}
+    entries := make([]fuse.Dirent, 0, len(f.Node.Children))
 
     for _, node := range f.Node.Children {
         entryType := fuse.DT_File
@@ -142,6 +191,12 @@ func (f *File) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
     return entries, nil
 }
 
+var _ fs.NodeReadlinker = (*File)(nil)
+
+func (f *File) Readlink(ctx context.Context, req *fuse.ReadlinkRequest) (string, error) {
+    return f.Node.LinkName, nil
+}
+
 var _ fs.NodeOpener = (*File)(nil)
 
 func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
@@ -158,6 +213,8 @@ func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenR
 
     if f.Node.Mode.IsDir() {
         return f, nil
+    } else if f.Node.IsLink() {
+        return f.FS.LinkMap[f.Node.LinkName].Open(ctx, req, resp)
     } else {
         fh := &FileHandle{
             File: f,

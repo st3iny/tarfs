@@ -12,8 +12,10 @@ import (
 
 type Node struct {
     index uint
+    typeflag byte
     Name string
     FullName string
+    LinkName string
     Size int64
     Mode os.FileMode
     Uid int
@@ -89,8 +91,10 @@ func parseNodes(name string, entries []*Header, archive *Archive) []Node {
         entry.Harvested = true
         node := Node{
             index: uint(index),
+            typeflag: entry.Header.Typeflag,
             Name: path.Base(file),
             FullName: file,
+            LinkName: entry.Header.Linkname,
             Size: entry.Header.Size,
             Uid: entry.Header.Uid,
             Gid: entry.Header.Gid,
@@ -116,19 +120,25 @@ func parseNodes(name string, entries []*Header, archive *Archive) []Node {
     return nodes
 }
 
-func (node *Node) listRecursive() []*Node {
-    nodes := []*Node{node}
-    for _, child := range node.Children {
-        nodes = append(nodes, child.listRecursive()...)
+func (node *Node) listRecursive(nodes *[]*Node) {
+    *nodes = append(*nodes, node)
+    for index, _ := range node.Children {
+        node.Children[index].listRecursive(nodes)
     }
+}
 
-    return nodes
+func (node *Node) IsLink() bool {
+    return node.typeflag == tar.TypeLink
+}
+
+func (node *Node) IsSymlink() bool {
+    return node.typeflag == tar.TypeSymlink
 }
 
 func (archive *Archive) List() []*Node {
     nodes := []*Node{}
-    for _, node := range archive.Nodes {
-        nodes = append(nodes, node.listRecursive()...)
+    for index, _ := range archive.Nodes {
+        archive.Nodes[index].listRecursive(&nodes)
     }
 
     return nodes
