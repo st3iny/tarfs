@@ -1,6 +1,7 @@
 package fs
 
 import (
+    "fmt"
     "io"
     "log"
     "os"
@@ -15,7 +16,13 @@ import (
     "golang.org/x/net/context"
 )
 
-func MountAndServe(archivePath string, mountpoint string) error {
+func MountAndServe(archivePath string, mountpoint string, debug bool) error {
+    if debug {
+        fuse.Debug = func(msg interface{}) {
+            log.Println(msg)
+        }
+    }
+
     c, err := fuse.Mount(
         mountpoint,
         fuse.FSName("tarfs"),
@@ -53,21 +60,22 @@ func createFS(archivePath string) (*FS, error) {
         return nil, err
     }
 
-    uid := int64(0)
-    gid := int64(0)
-
     user, err := user.Current()
-    if err == nil {
-        uid, _ = strconv.ParseInt(user.Uid, 10, 32)
-        gid, _ = strconv.ParseInt(user.Gid, 10, 32)
+    if err != nil {
+        return nil, err
+    }
+    uid, err1 := strconv.Atoi(user.Uid)
+    gid, err2 := strconv.Atoi(user.Gid)
+    if err1 != nil || err2 != nil {
+        return nil, fmt.Errorf("Could not get user uid or gid")
     }
 
     root := &archive.Node{
         Name: "root",
         FullName: "",
-        Mode: os.ModeDir | 0555,
-        Uid: int(uid),
-        Gid: int(gid),
+        Mode: os.ModeDir | 0o555,
+        Uid: uid,
+        Gid: gid,
         Children: arch.Nodes,
         Archive: arch,
     }
@@ -123,33 +131,16 @@ type FileHandle struct {
     Offset int64
 }
 
-var _ fs.FS = (*FS)(nil)
-// var _ fs.Node = (*File)(nil)
-// var _ fs.Handle = (*FileHandle)(nil)
-
-func (f *FS) Root() (fs.Node, error) {
-    return &f.RootNode, nil
+func (fs *FS) Root() (fs.Node, error) {
+    return fs.RootNode, nil
 }
 
-var _ fs.NodeStringLookuper = (*File)(nil)
-
-func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {
-    blocks := uint64(f.Node.Size) / 512
-    if blocks % 512 > 0 {
-        blocks++
-    }
-
+func (f File) Attr(ctx context.Context, a *fuse.Attr) error {
     if f.Node.IsLink() {
         return f.FS.LinkMap[f.Node.LinkName].Attr(ctx, a)
     }
 
-    a.Inode = uint64(f.Node.Index)
-    if f.Node.IsSymlink() {
-        a.Size = uint64(len(f.Node.LinkName))
-    } else {
-        a.Size = uint64(f.Node.Size)
-    }
-    a.Blocks = blocks
+    a.Size = uint64(f.Node.Size)
     a.Mode = f.Node.Mode
     a.Uid = uint32(f.Node.Uid)
     a.Gid = uint32(f.Node.Gid)
@@ -159,20 +150,17 @@ func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {
     return nil
 }
 
-func (f *File) Lookup(ctx context.Context, name string) (fs.Node, error) {
-    for index, _ := range f.Node.Children {
-        child := &f.Node.Children[index]
+func (f File) Lookup(ctx context.Context, name string) (fs.Node, error) {
+    for _, child := range f.Node.Children {
         if name == child.Name {
-            return &File{Node: child, FS: f.FS}, nil
+            return File{Node: &child, FS: f.FS}, nil
         }
     }
 
     return nil, fuse.ENOENT
 }
 
-var _ fs.HandleReadDirAller = (*File)(nil)
-
-func (f *File) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
+func (f File) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
     entries := make([]fuse.Dirent, 0, len(f.Node.Children))
 
     for _, node := range f.Node.Children {
@@ -182,7 +170,6 @@ func (f *File) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
         }
 
         entry := fuse.Dirent{
-            Inode: uint64(node.Index),
             Name: node.Name,
             Type: entryType,
         }
@@ -193,18 +180,21 @@ func (f *File) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
     return entries, nil
 }
 
-var _ fs.NodeReadlinker = (*File)(nil)
-
-func (f *File) Readlink(ctx context.Context, req *fuse.ReadlinkRequest) (string, error) {
+func (f File) Readlink(ctx context.Context, req *fuse.ReadlinkRequest) (string, error) {
     return f.Node.LinkName, nil
 }
 
-var _ fs.NodeOpener = (*File)(nil)
-
-func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
+func (f File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
     if !req.Flags.IsReadOnly() {
         return nil, fuse.Errno(syscall.EACCES)
     }
+
+    if f.Node.Mode.IsDir() {
+        return f, nil
+    } else if f.Node.IsLink() {
+        return f.FS.LinkMap[f.Node.LinkName].Open(ctx, req, resp)
+    }
+
     resp.Flags |= fuse.OpenKeepCache
     resp.Flags |= fuse.OpenNonSeekable
 
@@ -213,22 +203,13 @@ func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenR
         return nil, fuse.EIO
     }
 
-    if f.Node.Mode.IsDir() {
-        return f, nil
-    } else if f.Node.IsLink() {
-        return f.FS.LinkMap[f.Node.LinkName].Open(ctx, req, resp)
-    } else {
-        fh := &FileHandle{
-            File: f,
-            Reader: reader,
-            Offset: 0,
-        }
-        return fh, nil
+    fh := &FileHandle{
+        File: &f,
+        Reader: reader,
+        Offset: 0,
     }
-
+    return fh, nil
 }
-
-var _ fs.HandleReader = (*FileHandle)(nil)
 
 func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
     if fh.Offset != req.Offset {
@@ -249,8 +230,6 @@ func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fus
     resp.Data = buf
     return nil
 }
-
-var _ fs.HandleReleaser = (*FileHandle)(nil)
 
 func (fh *FileHandle) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
     err := fh.Reader.Close()

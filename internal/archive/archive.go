@@ -2,6 +2,7 @@ package archive
 
 import (
     "archive/tar"
+    "fmt"
     "io"
     "log"
     "os"
@@ -11,19 +12,18 @@ import (
 )
 
 type Node struct {
-    Index uint
-    typeflag byte
+    index int
     Name string
     FullName string
     LinkName string
     Size int64
     Mode os.FileMode
+    typeflag byte
     Uid int
     Gid int
     Mtime time.Time
     Atime time.Time
     Ctime time.Time
-    FileInfo os.FileInfo
     Parent *Node
     Children []Node
     Archive *Archive
@@ -34,7 +34,8 @@ type Archive struct {
     Nodes []Node
 }
 
-type Header struct {
+type tarEntry struct {
+    Index int
     Header *tar.Header
     Harvested bool
 }
@@ -45,56 +46,70 @@ func ReadArchive(archivePath string) (*Archive, error) {
         return nil, err
     }
 
-    archive := &Archive{Path: archivePath}
-
-    headers := []*Header{}
+    var entries []*tarEntry
+    arch := &Archive{Path: archivePath}
     reader := tar.NewReader(file)
+    index := 0
     for {
-        header, err := reader.Next();
+        header, err := reader.Next()
         if err == io.EOF {
             break
         } else if err != nil {
             log.Panic(err)
         }
 
-        log.Println(header.Name)
-        headers = append(headers, &Header{Header: header, Harvested: false})
+        entries = append(entries, &tarEntry{Index: index, Header: header, Harvested: false})
+        index++
     }
 
-    archive.Nodes = parseNodes("", headers, archive)
+    arch.Nodes = parseNodes(nil, entries, arch)
 
-    for _, header := range headers {
-        if !header.Harvested {
-            log.Println("orphaned node at", header.Header.Name)
+    for _, entry := range entries {
+        if !entry.Harvested {
+            log.Println("Orphaned node at", entry.Header.Name)
         }
     }
 
-    return archive, nil
+    return arch, nil
 }
 
-func parseNodes(name string, entries []*Header, archive *Archive) []Node {
-    nodes := []Node{}
+func parseNodes(parent *Node, entries []*tarEntry, arch *Archive) []Node {
+    var nodes []Node
+    parentReached := false
     for index, entry := range entries {
         file := entry.Header.Name
-        if entry.Harvested || file == name || !strings.HasPrefix(file, name) {
+        isDir := entry.Header.FileInfo().IsDir()
+
+        file = strings.TrimPrefix(file, "/")
+        file = strings.TrimPrefix(file, "./")
+        if file == "" {
             continue
         }
 
-        fileIsDirectory := strings.HasSuffix(file, "/")
-        if name != "" {
-            fileSlashCount := strings.Count(file, "/")
-            nodeSlashCount := strings.Count(name, "/")
-            if fileIsDirectory && fileSlashCount > nodeSlashCount + 1 {
-                continue
-            } else if !fileIsDirectory && fileSlashCount > nodeSlashCount {
-                continue
+        // fast forward to current parent
+        if parent != nil && !parentReached {
+            if file == parent.FullName {
+                parentReached = true
             }
+            continue
+        }
+
+        // exit if all childs of parent have been recursively harvested
+        if parent != nil && parentReached && !strings.HasPrefix(file, parent.FullName) {
+            break
+        }
+
+        if parent == nil && !isDir && strings.Count(file, "/") > 0 {
+            continue
+        }
+
+        if entry.Harvested {
+            continue
         }
 
         entry.Harvested = true
         node := Node{
-            Index: uint(index),
-            typeflag: entry.Header.Typeflag,
+            index: entry.Index,
             Name: path.Base(file),
             FullName: file,
             LinkName: entry.Header.Linkname,
@@ -102,19 +117,16 @@ func parseNodes(name string, entries []*Header, archive *Archive) []Node {
             Uid: entry.Header.Uid,
             Gid: entry.Header.Gid,
             Mode: entry.Header.FileInfo().Mode(),
-            FileInfo: entry.Header.FileInfo(),
+            typeflag: entry.Header.Typeflag,
             Mtime: entry.Header.ModTime,
             Atime: entry.Header.AccessTime,
             Ctime: entry.Header.ChangeTime,
-            Children: []Node{},
-            Archive: archive,
+            Archive: arch,
+            Parent: parent,
         }
 
-        if fileIsDirectory {
-            node.Children = parseNodes(node.FullName, entries, archive)
-            for _, child := range node.Children {
-                child.Parent = &node
-            }
+        if isDir {
+            node.Children = parseNodes(&node, entries[index:], arch)
         }
 
         nodes = append(nodes, node)
@@ -125,8 +137,8 @@ func parseNodes(name string, entries []*Header, archive *Archive) []Node {
 
 func (node *Node) listRecursive(nodes *[]*Node) {
     *nodes = append(*nodes, node)
-    for index, _ := range node.Children {
-        node.Children[index].listRecursive(nodes)
+    for _, child := range node.Children {
+        child.listRecursive(nodes)
     }
 }
 
@@ -138,12 +150,11 @@ func (node *Node) IsSymlink() bool {
     return node.typeflag == tar.TypeSymlink
 }
 
-func (archive *Archive) List() []*Node {
-    nodes := []*Node{}
-    for index, _ := range archive.Nodes {
-        archive.Nodes[index].listRecursive(&nodes)
+func (arch *Archive) List() []*Node {
+    var nodes []*Node
+    for _, node := range arch.Nodes {
+        node.listRecursive(&nodes)
     }
-
     return nodes
 }
 
@@ -161,13 +172,17 @@ func (nodeReader *NodeReader) Close() error {
 }
 
 func (node *Node) Open() (io.ReadCloser, error) {
+    if !node.Mode.IsRegular() {
+        return nil, fmt.Errorf("Not a file")
+    }
+
     file, err := os.Open(node.Archive.Path)
     if err != nil {
         return nil, err
     }
 
     reader := tar.NewReader(file)
-    for i := uint(0); i <= node.Index; i++ {
+    for i := 0; i <= node.index; i++ {
         if _, err := reader.Next(); err != nil {
             return nil, err
         }
