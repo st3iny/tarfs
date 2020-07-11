@@ -1,4 +1,4 @@
-package main
+package archive
 
 import (
     "archive/tar"
@@ -11,7 +11,7 @@ import (
 )
 
 type Node struct {
-    index uint
+    Index uint
     typeflag byte
     Name string
     FullName string
@@ -53,8 +53,11 @@ func ReadArchive(archivePath string) (*Archive, error) {
         header, err := reader.Next();
         if err == io.EOF {
             break
+        } else if err != nil {
+            log.Panic(err)
         }
 
+        log.Println(header.Name)
         headers = append(headers, &Header{Header: header, Harvested: false})
     }
 
@@ -90,7 +93,7 @@ func parseNodes(name string, entries []*Header, archive *Archive) []Node {
 
         entry.Harvested = true
         node := Node{
-            index: uint(index),
+            Index: uint(index),
             typeflag: entry.Header.Typeflag,
             Name: path.Base(file),
             FullName: file,
@@ -164,7 +167,7 @@ func (node *Node) Open() (io.ReadCloser, error) {
     }
 
     reader := tar.NewReader(file)
-    for i := uint(0); i <= node.index; i++ {
+    for i := uint(0); i <= node.Index; i++ {
         if _, err := reader.Next(); err != nil {
             return nil, err
         }

@@ -1,4 +1,4 @@
-package main
+package fs
 
 import (
     "io"
@@ -7,6 +7,8 @@ import (
     "strconv"
     "syscall"
     "os/user"
+
+    "github.com/st3iny/tarfs/internal/archive"
 
     "bazil.org/fuse"
     "bazil.org/fuse/fs"
@@ -45,8 +47,8 @@ func MountAndServe(archivePath string, mountpoint string) error {
 }
 
 func createFS(archivePath string) (*FS, error) {
-    var archive *Archive
-    archive, err := ReadArchive(archivePath)
+    var arch *archive.Archive
+    arch, err := archive.ReadArchive(archivePath)
     if err != nil {
         return nil, err
     }
@@ -60,29 +62,29 @@ func createFS(archivePath string) (*FS, error) {
         gid, _ = strconv.ParseInt(user.Gid, 10, 32)
     }
 
-    root := &Node{
+    root := &archive.Node{
         Name: "root",
         FullName: "",
         Mode: os.ModeDir | 0555,
         Uid: int(uid),
         Gid: int(gid),
-        Children: archive.Nodes,
-        Archive: archive,
+        Children: arch.Nodes,
+        Archive: arch,
     }
 
     filesys := &FS{
-        Archive: *archive,
+        Archive: *arch,
         RootNode: File{Node: root},
     }
 
-    linkMap := createLinkMap(archive, filesys)
+    linkMap := createLinkMap(arch, filesys)
     filesys.LinkMap = linkMap
     filesys.RootNode.FS = filesys
 
     return filesys, nil
 }
 
-func createLinkMap(archive *Archive, filesys *FS) map[string]*File  {
+func createLinkMap(archive *archive.Archive, filesys *FS) map[string]*File  {
     linkMap := make(map[string]*File)
     for _, node := range archive.List() {
         if node.IsLink() {
@@ -105,13 +107,13 @@ func createLinkMap(archive *Archive, filesys *FS) map[string]*File  {
 }
 
 type FS struct {
-    Archive Archive
+    Archive archive.Archive
     RootNode File
     LinkMap map[string]*File
 }
 
 type File struct {
-    Node *Node
+    Node *archive.Node
     FS *FS
 }
 
@@ -141,7 +143,7 @@ func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {
         return f.FS.LinkMap[f.Node.LinkName].Attr(ctx, a)
     }
 
-    a.Inode = uint64(f.Node.index)
+    a.Inode = uint64(f.Node.Index)
     if f.Node.IsSymlink() {
         a.Size = uint64(len(f.Node.LinkName))
     } else {
@@ -180,7 +182,7 @@ func (f *File) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
         }
 
         entry := fuse.Dirent{
-            Inode: uint64(node.index),
+            Inode: uint64(node.Index),
             Name: node.Name,
             Type: entryType,
         }

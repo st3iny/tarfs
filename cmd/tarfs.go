@@ -5,6 +5,8 @@ import (
     "fmt"
     "log"
     "os"
+
+    "github.com/st3iny/tarfs/internal/fs"
 )
 
 func main() {
@@ -18,7 +20,7 @@ func main() {
     archivePath := flag.Arg(0)
     mountpoint := flag.Arg(1)
 
-    if err := MountAndServe(archivePath, mountpoint); err != nil {
+    if err := fs.MountAndServe(archivePath, mountpoint); err != nil {
         log.Fatal(err)
     }
 }
