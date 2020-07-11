@@ -1,4 +1,4 @@
-INSTALL_DIR = /usr/local/bin
+INSTALL_DIR ?= /usr/local/bin
 
 all: build
 
@@ -10,6 +10,6 @@ clean:
 	rm tarfs
 
 install: build
-	sudo install tarfs ${INSTALL_DIR}
+	install tarfs ${INSTALL_DIR}
 
-.PHONY: build clean install
+.PHONY: all build clean install
