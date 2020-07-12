@@ -120,19 +120,13 @@ type FS struct {
     LinkMap map[string]*File
 }
 
+func (fs *FS) Root() (fs.Node, error) {
+    return fs.RootNode, nil
+}
+
 type File struct {
     Node *archive.Node
     FS *FS
-}
-
-type FileHandle struct {
-    File *File
-    Reader io.ReadCloser
-    Offset int64
-}
-
-func (fs *FS) Root() (fs.Node, error) {
-    return fs.RootNode, nil
 }
 
 func (f File) Attr(ctx context.Context, a *fuse.Attr) error {
@@ -209,6 +203,12 @@ func (f File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenRe
         Offset: 0,
     }
     return fh, nil
+}
+
+type FileHandle struct {
+    File *File
+    Reader io.ReadCloser
+    Offset int64
 }
 
 func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
