@@ -63,13 +63,6 @@ func ReadArchive(archivePath string) (*Archive, error) {
     }
 
     arch.Nodes = parseNodes(nil, entries, arch)
-
-    for _, entry := range entries {
-        if !entry.Harvested {
-            log.Println("Orphaned node at", entry.Header.Name)
-        }
-    }
-
     return arch, nil
 }
 
