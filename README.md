@@ -7,6 +7,9 @@ Usage: tarfs [-d] ARCHIVE_PATH MOUNTPOINT
   -d	Enable fuse debug mode
 ```
 
+Currently, `tarfs` handles bzip2, gzip and zstd compressed tar archives.
+Uncompressed archives can be opened aswell.
+
 ## Build
 Run `make` to build the binary `tarfs`.
 
