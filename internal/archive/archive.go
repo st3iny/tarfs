@@ -9,42 +9,11 @@ import (
     "os"
     "path"
     "strings"
-    "time"
 
     "github.com/DataDog/zstd"
 )
 
-const (
-    errorUnsupportedFormat string = "Unsupported archive format"
-    compressionNone string = "none"
-    compressionBzip2 string = "bzip2"
-    compressionGzip string = "gzip"
-    compressionZstd string = "zstd"
-)
-
-type Node struct {
-    index int
-    Name string
-    FullName string
-    LinkName string
-    Size int64
-    Mode os.FileMode
-    typeflag byte
-    Uid int
-    Gid int
-    Mtime time.Time
-    Atime time.Time
-    Ctime time.Time
-    Parent *Node
-    Children []Node
-    Archive *Archive
-}
-
-type Archive struct {
-    Path string
-    Nodes []Node
-    compression string
-}
+const errorUnsupportedFormat string = "Unsupported archive format"
 
 type tarEntry struct {
     Index int
@@ -52,23 +21,10 @@ type tarEntry struct {
     Harvested bool
 }
 
-func (arch *Archive) Read(file *os.File) (*tar.Reader, error) {
-    file.Seek(0, 0)
-    var reader io.Reader
-    switch arch.compression {
-    case compressionBzip2:
-        reader = bzip2.NewReader(file)
-    case compressionGzip:
-        reader, _ = gzip.NewReader(file)
-    case compressionZstd:
-        reader = zstd.NewReader(file)
-    case compressionNone:
-        reader = file
-    default:
-        return nil, fmt.Errorf(errorUnsupportedFormat)
-    }
-
-    return tar.NewReader(reader), nil
+type Archive struct {
+    Path string
+    Nodes []Node
+    compression string
 }
 
 func ReadArchive(path string) (*Archive, error) {
@@ -115,26 +71,31 @@ func ReadArchive(path string) (*Archive, error) {
     return arch, nil
 }
 
-func isBzip2(file *os.File) bool {
+func (arch *Archive) Read(file *os.File) (*tar.Reader, error) {
     file.Seek(0, 0)
-    reader := bzip2.NewReader(file)
-    buf := make([]byte, 16)
-    _, err := reader.Read(buf)
-    return err == nil
+    var reader io.Reader
+    switch arch.compression {
+    case compressionBzip2:
+        reader = bzip2.NewReader(file)
+    case compressionGzip:
+        reader, _ = gzip.NewReader(file)
+    case compressionZstd:
+        reader = zstd.NewReader(file)
+    case compressionNone:
+        reader = file
+    default:
+        return nil, fmt.Errorf(errorUnsupportedFormat)
+    }
+
+    return tar.NewReader(reader), nil
 }
 
-func isGzip(file *os.File) bool {
-    file.Seek(0, 0)
-    _, err := gzip.NewReader(file)
-    return err == nil
-}
-
-func isZstd(file *os.File) bool {
-    file.Seek(0, 0)
-    reader := zstd.NewReader(file)
-    buf := make([]byte, 16)
-    _, err := reader.Read(buf)
-    return err == nil
+func (arch *Archive) List() []*Node {
+    var nodes []*Node
+    for _, node := range arch.Nodes {
+        node.listRecursive(&nodes)
+    }
+    return nodes
 }
 
 func parseNodes(parent *Node, entries []*tarEntry, arch *Archive) []Node {
@@ -197,64 +158,4 @@ func parseNodes(parent *Node, entries []*tarEntry, arch *Archive) []Node {
     }
 
     return nodes
-}
-
-func (node *Node) listRecursive(nodes *[]*Node) {
-    *nodes = append(*nodes, node)
-    for _, child := range node.Children {
-        child.listRecursive(nodes)
-    }
-}
-
-func (node *Node) IsLink() bool {
-    return node.typeflag == tar.TypeLink
-}
-
-func (node *Node) IsSymlink() bool {
-    return node.typeflag == tar.TypeSymlink
-}
-
-func (arch *Archive) List() []*Node {
-    var nodes []*Node
-    for _, node := range arch.Nodes {
-        node.listRecursive(&nodes)
-    }
-    return nodes
-}
-
-type NodeReader struct {
-    file *os.File
-    reader *tar.Reader
-}
-
-func (nodeReader *NodeReader) Read(buf []byte) (int, error) {
-    return nodeReader.reader.Read(buf)
-}
-
-func (nodeReader *NodeReader) Close() error {
-    return nodeReader.file.Close()
-}
-
-func (node *Node) Open() (io.ReadCloser, error) {
-    if !node.Mode.IsRegular() {
-        return nil, fmt.Errorf("Not a file")
-    }
-
-    file, err := os.Open(node.Archive.Path)
-    if err != nil {
-        return nil, err
-    }
-
-    reader, err := node.Archive.Read(file)
-    if err != nil {
-        return nil, err
-    }
-
-    for i := 0; i <= node.index; i++ {
-        if _, err := reader.Next(); err != nil {
-            return nil, err
-        }
-    }
-
-    return &NodeReader{file: file, reader: reader}, nil
 }
