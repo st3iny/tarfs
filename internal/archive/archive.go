@@ -2,15 +2,11 @@ package archive
 
 import (
     "archive/tar"
-    "compress/bzip2"
-    "compress/gzip"
     "fmt"
     "io"
     "os"
     "path"
     "strings"
-
-    "github.com/DataDog/zstd"
 )
 
 const errorUnsupportedFormat string = "Unsupported archive format"
@@ -34,23 +30,8 @@ func ReadArchive(path string) (*Archive, error) {
     }
     defer file.Close()
 
-    arch := &Archive{Path: path}
-
-    if isBzip2(file) {
-        arch.compression = compressionBzip2
-    } else if isGzip(file) {
-        arch.compression = compressionGzip
-    } else if isZstd(file) {
-        arch.compression = compressionZstd
-    } else {
-        arch.compression = compressionNone
-    }
-
     var entries []*tarEntry
-    if err != nil {
-        return nil, err
-    }
-
+    arch := &Archive{Path: path, compression: getCompression(file)}
     tarReader, err := arch.Read(file)
     index := 0
     for {
@@ -72,19 +53,9 @@ func ReadArchive(path string) (*Archive, error) {
 }
 
 func (arch *Archive) Read(file *os.File) (*tar.Reader, error) {
-    file.Seek(0, 0)
-    var reader io.Reader
-    switch arch.compression {
-    case compressionBzip2:
-        reader = bzip2.NewReader(file)
-    case compressionGzip:
-        reader, _ = gzip.NewReader(file)
-    case compressionZstd:
-        reader = zstd.NewReader(file)
-    case compressionNone:
-        reader = file
-    default:
-        return nil, fmt.Errorf(errorUnsupportedFormat)
+    reader, err := decompress(file, arch.compression)
+    if err != nil {
+        return nil, err
     }
 
     return tar.NewReader(reader), nil
