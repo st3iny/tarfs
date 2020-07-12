@@ -2,13 +2,24 @@ package archive
 
 import (
     "archive/tar"
+    "compress/bzip2"
+    "compress/gzip"
     "fmt"
     "io"
-    "log"
     "os"
     "path"
     "strings"
     "time"
+
+    "github.com/DataDog/zstd"
+)
+
+const (
+    errorUnsupportedFormat string = "Unsupported archive format"
+    compressionNone string = "none"
+    compressionBzip2 string = "bzip2"
+    compressionGzip string = "gzip"
+    compressionZstd string = "zstd"
 )
 
 type Node struct {
@@ -32,6 +43,7 @@ type Node struct {
 type Archive struct {
     Path string
     Nodes []Node
+    compression string
 }
 
 type tarEntry struct {
@@ -40,22 +52,59 @@ type tarEntry struct {
     Harvested bool
 }
 
-func ReadArchive(archivePath string) (*Archive, error) {
-    file, err := os.Open(archivePath)
+func (arch *Archive) Read(file *os.File) (*tar.Reader, error) {
+    file.Seek(0, 0)
+    var reader io.Reader
+    switch arch.compression {
+    case compressionBzip2:
+        reader = bzip2.NewReader(file)
+    case compressionGzip:
+        reader, _ = gzip.NewReader(file)
+    case compressionZstd:
+        reader = zstd.NewReader(file)
+    case compressionNone:
+        reader = file
+    default:
+        return nil, fmt.Errorf(errorUnsupportedFormat)
+    }
+
+    return tar.NewReader(reader), nil
+}
+
+func ReadArchive(path string) (*Archive, error) {
+    file, err := os.Open(path)
+    if err != nil {
+        return nil, err
+    }
+    defer file.Close()
+
+    arch := &Archive{Path: path}
+
+    if isBzip2(file) {
+        arch.compression = compressionBzip2
+    } else if isGzip(file) {
+        arch.compression = compressionGzip
+    } else if isZstd(file) {
+        arch.compression = compressionZstd
+    } else {
+        arch.compression = compressionNone
+    }
+
+    var entries []*tarEntry
     if err != nil {
         return nil, err
     }
 
-    var entries []*tarEntry
-    arch := &Archive{Path: archivePath}
-    reader := tar.NewReader(file)
+    tarReader, err := arch.Read(file)
     index := 0
     for {
-        header, err := reader.Next()
+        header, err := tarReader.Next()
         if err == io.EOF {
             break
+        } else if err == tar.ErrHeader {
+            return nil, fmt.Errorf(errorUnsupportedFormat)
         } else if err != nil {
-            log.Panic(err)
+            return nil, err
         }
 
         entries = append(entries, &tarEntry{Index: index, Header: header, Harvested: false})
@@ -64,6 +113,28 @@ func ReadArchive(archivePath string) (*Archive, error) {
 
     arch.Nodes = parseNodes(nil, entries, arch)
     return arch, nil
+}
+
+func isBzip2(file *os.File) bool {
+    file.Seek(0, 0)
+    reader := bzip2.NewReader(file)
+    buf := make([]byte, 16)
+    _, err := reader.Read(buf)
+    return err == nil
+}
+
+func isGzip(file *os.File) bool {
+    file.Seek(0, 0)
+    _, err := gzip.NewReader(file)
+    return err == nil
+}
+
+func isZstd(file *os.File) bool {
+    file.Seek(0, 0)
+    reader := zstd.NewReader(file)
+    buf := make([]byte, 16)
+    _, err := reader.Read(buf)
+    return err == nil
 }
 
 func parseNodes(parent *Node, entries []*tarEntry, arch *Archive) []Node {
@@ -174,7 +245,11 @@ func (node *Node) Open() (io.ReadCloser, error) {
         return nil, err
     }
 
-    reader := tar.NewReader(file)
+    reader, err := node.Archive.Read(file)
+    if err != nil {
+        return nil, err
+    }
+
     for i := 0; i <= node.index; i++ {
         if _, err := reader.Next(); err != nil {
             return nil, err
