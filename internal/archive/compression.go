@@ -8,6 +8,7 @@ import (
     "os"
 
     "github.com/DataDog/zstd"
+    "github.com/xi2/xz"
 )
 
 const (
@@ -15,6 +16,7 @@ const (
     compressionBzip2 string = "bzip2"
     compressionGzip string = "gzip"
     compressionZstd string = "zstd"
+    compressionXz string = "xz"
 )
 
 func isBzip2(file *os.File) bool {
@@ -39,6 +41,12 @@ func isZstd(file *os.File) bool {
     return err == nil
 }
 
+func isXz(file *os.File) bool {
+    file.Seek(0, 0)
+    _, err := xz.NewReader(file, 0)
+    return err == nil
+}
+
 func getCompression(file *os.File) string {
     var compression string
     if isBzip2(file) {
@@ -47,6 +55,8 @@ func getCompression(file *os.File) string {
         compression = compressionGzip
     } else if isZstd(file) {
         compression = compressionZstd
+    } else if isXz(file) {
+        compression = compressionXz
     } else {
         compression = compressionNone
     }
@@ -64,6 +74,12 @@ func decompress(file *os.File, compression string) (io.Reader, error) {
         reader, _ = gzip.NewReader(file)
     case compressionZstd:
         reader = zstd.NewReader(file)
+    case compressionXz:
+        var err error
+        reader, err = xz.NewReader(file, 0)
+        if err != nil {
+            panic(err)
+        }
     case compressionNone:
         reader = file
     default:
