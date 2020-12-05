@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger release
+        shell: bash
+        env:
+          GITLAB_TRIGGER_TOKEN: ${{ secrets.GITLAB_TRIGGER_TOKEN }}
+        run: |
+          curl \
+            --silent --show-error --fail \
+            --request POST \
+            --form token=${GITLAB_TRIGGER_TOKEN} \
+            --form ref=master \
+            --form "variables[PACKAGE_NAME]=tarfs-git" \
+            https://gitlab.com/api/v4/projects/22879779/trigger/pipeline \
+            > /dev/null
