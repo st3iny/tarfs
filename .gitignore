@@ -1,8 +1,1 @@
-# jetbrains
-.idea/
-
-# go
-pkg/
-
-# binary
-tarfs
+/target
