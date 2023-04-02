@@ -73,7 +73,6 @@ impl Tree {
 
                 // Propagate read bits to execte bits for directories
                 if header.entry_type() == EntryType::Directory {
-                    //mode |= 0o111;
                     mode |= (mode & 0o444) >> 2;
                 }
 
@@ -130,7 +129,6 @@ impl Tree {
                     uid: resolve_uid(header.username_bytes(), header.uid())?,
                     gid: resolve_gid(header.groupname_bytes(), header.gid())?,
                     perms: calculate_perms(header)?,
-                    offset: entry.raw_file_position(),
                     archive_index: archive_index as u64,
                     link_count: AtomicU32::new(1),
                 },
@@ -282,7 +280,6 @@ pub enum Node {
         uid: u32,
         gid: u32,
         perms: u16,
-        offset: u64,
         archive_index: u64,
         link_count: AtomicU32,
     },
