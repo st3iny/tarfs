@@ -22,10 +22,13 @@ Options:
 
 Currently, `tarfs` handles uncompressed, bzip2, gzip, xz and zstd compressed tar archives.
 
+The log level can be configured via the `RUST_LOG` environment variable. Available log levels are
+`trace`, `debug`, `info`, `warn` and `error`. The default log level is `info`.
+
 ## Build
 
-Run `cargo build` to create a debug build at `target/debug/tarfs`.
+Run `cargo build` to build a debug binary at `target/debug/tarfs`.
 
-Run `cargo build --release` to create a debug build at `target/release/tarfs`.
+Run `cargo build --release` to build a release binary at `target/release/tarfs`.
 
-Run `cargo install --path=.` to install the binary to `~/.cargo/bin/tarfs`.
+Run `cargo install --path=.` to build and install a release binary to `~/.cargo/bin/tarfs`.
