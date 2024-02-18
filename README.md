@@ -1,17 +1,31 @@
 # tarfs
-Mount tarballs readonly via FUSE. Written in go.
+Mount tarballs readonly via FUSE. Written in Rust.
 
 ## Usage
 ```
-Usage: tarfs [-d] ARCHIVE_PATH MOUNTPOINT
-  -d	Enable fuse debug mode
+Mount a tar archive as a read-only file system
+
+Usage: tarfs [OPTIONS] <ARCHIVE> <MOUNT_POINT>
+
+Arguments:
+  <ARCHIVE>      Path to the archive
+  <MOUNT_POINT>  Mount point for the file system
+
+Options:
+      --auto-unmount  Unmount the file system automatically on exit
+      --allow-root    Allow root to access the file system
+      --allow-other   Allow other users to access the file system
+      --dump-tree     Dump the file system tree to the debug log
+  -h, --help          Print help
+  -V, --version       Print version
 ```
 
-Currently, `tarfs` handles bzip2, gzip, xz and zstd compressed tar archives.
-Uncompressed archives can be opened aswell.
+Currently, `tarfs` handles uncompressed, bzip2, gzip, xz and zstd compressed tar archives.
 
 ## Build
-Run `make` to build the binary `tarfs`.
 
-Run `make install` to install the binary to `/usr/local/bin`.
-A custom install directory can be set via the `INSTALL_DIR` environment variable.
+Run `cargo build` to create a debug build at `target/debug/tarfs`.
+
+Run `cargo build --release` to create a debug build at `target/release/tarfs`.
+
+Run `cargo install --path=.` to install the binary to `~/.cargo/bin/tarfs`.
