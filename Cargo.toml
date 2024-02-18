@@ -1,0 +1,21 @@
+[package]
+name = "tarfs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.79"
+blake = "2.0.2"
+bzip2 = "0.4.4"
+camino = "1.1.6"
+clap = { version = "4.5.1", features = ["derive"] }
+env_logger = "0.11.2"
+flate2 = "1.0.28"
+fuser = "0.14.0"
+hex = "0.4.3"
+infer = "0.15.0"
+libc = "0.2.153"
+log = "0.4.20"
+tar = "0.4.40"
+xz = "0.1.0"
+zstd = "0.13.0"
