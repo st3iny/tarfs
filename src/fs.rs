@@ -187,7 +187,13 @@ impl Filesystem for ArchiveFs {
         }
     }
 
-    fn getattr(&mut self, _req: &fuser::Request<'_>, ino: u64, reply: fuser::ReplyAttr) {
+    fn getattr(
+        &mut self,
+        _req: &fuser::Request<'_>,
+        ino: u64,
+        _fh: Option<u64>,
+        reply: fuser::ReplyAttr,
+    ) {
         let Some(node) = self.search(ino) else {
             reply.error(libc::ENOENT);
             return;
